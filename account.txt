@@ -1,3 +1,4 @@
 admin admin@123 admin@hust.edu.vn 0123456789 1 1
 user1 123456 user1@gmail.com 0987654321 1 0
 tumroy 123 tum@gmail.com 0823415595 1 0
+tiepkun 123 nkt@gmail.com 0823415595 1 0
