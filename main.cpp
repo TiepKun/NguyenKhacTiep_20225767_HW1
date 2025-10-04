@@ -1,317 +1,203 @@
 #include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <map>
+#include <set>
+#include <queue>
+#include <stack>
+#include <deque>
+#include <list>
+#include <bitset>
+#include <utility>
+#include <functional>
 #include <fstream>
 #include <sstream>
-#include <vector>
-#include <ctime>
-#include <cstdlib>
-#include <cctype>
+#include <iomanip>
+#include <limits>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 using namespace std;
 
-const int UNLOCK_MINUTES = 10; // 10 phút auto-unlock
+struct Account {
+    string user, pass, email, phone;
+    int active; // 1: active, 0: blocked
+    int role;   // 0: normal, 1: admin
 
-/* =================== Utilities =================== */
-string trim(const string& s) {
-    size_t start = s.find_first_not_of(" \t\r\n");
-    size_t end   = s.find_last_not_of(" \t\r\n");
-    if (start == string::npos) return "";
-    return s.substr(start, end - start + 1);
-}
-
-string safeInput(const string& prompt) {
-    string s;
-    cout << prompt;
-    getline(cin, s);
-    return trim(s);
-}
-
-bool isValidPhone(const string& ph) {
-    if (ph.size() != 10) return false;
-    for (char c : ph) if (!isdigit(c)) return false;
-    return true;
-}
-
-bool isValidEmail(const string& e) {
-    string suffix = "@gmail.com";
-    if (e.size() <= suffix.size()) return false;
-    return e.compare(e.size()-suffix.size(), suffix.size(), suffix) == 0;
-}
-
-/* =================== Account Class =================== */
-class Account {
-private:
-    string username, password, email, phone;
-    int status; // 1 active, 0 blocked
-    int role;   // 0 user, 1 admin
-
-public:
-    Account(string u="", string p="", string e="", string ph="", int s=1, int r=0)
-        : username(u), password(p), email(e), phone(ph), status(s), role(r) {}
-
-    string getUsername() const { return username; }
-    string getPassword() const { return password; }
-    string getEmail() const { return email; }
-    string getPhone() const { return phone; }
-    int getStatus() const { return status; }
-    int getRole() const { return role; }
-
-    void setPassword(const string& p) { password = p; }
-    void setEmail(const string& e) { email = e; }
-    void setPhone(const string& ph) { phone = ph; }
-    void setStatus(int s) { status = s; }
-    void setRole(int r) { role = r; }
-
-    string toString() const {
-        ostringstream oss;
-        oss << username << " " << password << " "
-            << email << " " << phone << " " << status << " " << role;
-        return oss.str();
+    string toLine() const {
+        return user+" "+pass+" "+email+" "+phone+" "+
+               to_string(active)+" "+to_string(role);
     }
-    static Account fromString(const string& line) {
-        istringstream iss(line);
-        string u,p,e,ph; int s,r;
-        iss >> u >> p >> e >> ph >> s >> r;
-        return Account(u,p,e,ph,s,r);
+
+    static Account fromLine(const string& line) {
+        Account a;
+        stringstream ss(line);
+        ss >> a.user >> a.pass >> a.email >> a.phone >> a.active >> a.role;
+        return a;
     }
 };
 
-/* =================== AccountManager =================== */
-class AccountManager {
-private:
-    vector<Account> accounts;
-    Account* currentUser = nullptr;
+struct AccountManager {
+    vector<Account> list;
+    Account* cur = nullptr;
 
-    void saveAccounts(const string& filename) {
-        ofstream fout(filename);
-        for (auto& acc : accounts) fout << acc.toString() << "\n";
-    }
-    void logLogin(const string& username) {
-        ofstream fout("history.txt", ios::app);
-        time_t now = time(nullptr);
-        tm* t = localtime(&now);
-        char buf[64];
-        strftime(buf, sizeof(buf), "%d/%m/%Y %H:%M:%S", t);
-        fout << username << " | " << buf << "\n";
+    void load(const string& fn="account.txt") {
+        list.clear();
+        ifstream f(fn);
+        string s;
+        while(getline(f,s)) if(!s.empty()) list.push_back(Account::fromLine(s));
     }
 
-    time_t getLockTime(const string& user) {
-        ifstream fin("lock.txt");
-        string line;
-        while (getline(fin,line)) {
-            string u; long long t;
-            if (sscanf(line.c_str(), "%[^|]|%lld", &u[0], &t)) {}
-        }
-        fin.close();
-        ifstream fin2("lock.txt");
-        while (getline(fin2,line)) {
-            size_t pos = line.find('|');
-            if (pos!=string::npos) {
-                string u = line.substr(0,pos);
-                long long t = stoll(line.substr(pos+1));
-                if (u==user) return (time_t)t;
-            }
+    void save(const string& fn="account.txt") {
+        ofstream f(fn);
+        for(auto& a:list) f<<a.toLine()<<"\n";
+    }
+
+    void log(const string& u) {
+        ofstream f("history.txt",ios::app);
+        time_t now=time(nullptr); char buf[32];
+        strftime(buf,sizeof(buf),"%d/%m/%Y %H:%M:%S",localtime(&now));
+        f<<u<<" | "<<buf<<"\n";
+    }
+
+    long lockTime(const string& u) {
+        ifstream f("lock.txt"); string line;
+        while(getline(f,line)){
+            auto p=line.find('|'); if(p==string::npos) continue;
+            if(line.substr(0,p)==u) return stol(line.substr(p+1));
         }
         return 0;
     }
-    void setLockTime(const string& user, time_t t) {
-        ifstream fin("lock.txt");
-        vector<string> lines;
-        string line; bool found=false;
-        while (getline(fin,line)) {
-            size_t pos=line.find('|');
-            if (pos!=string::npos) {
-                string u=line.substr(0,pos);
-                if (u==user) { found=true; continue; }
-            }
-            lines.push_back(line);
+
+    void setLock(const string& u,long t) {
+        ifstream f("lock.txt"); vector<string> v; string line;
+        while(getline(f,line)){
+            auto p=line.find('|'); if(p==string::npos) continue;
+            if(line.substr(0,p)!=u) v.push_back(line);
         }
-        fin.close();
-        ofstream fout("lock.txt");
-        for (auto& l:lines) fout<<l<<"\n";
-        if (t!=0) fout<<user<<"|"<<t<<"\n";
+        f.close();
+        ofstream g("lock.txt");
+        for(auto& s:v) g<<s<<"\n";
+        if(t) g<<u<<"|"<<t<<"\n";
     }
 
-public:
-    void loadAccounts(const string& filename) {
-        accounts.clear();
-        ifstream fin(filename);
-        string line;
-        while (getline(fin, line)) {
-            if (!line.empty())
-                accounts.push_back(Account::fromString(line));
+    bool validEmail(const string& e){
+        return e.size()>10 && e.rfind("@gmail.com")==e.size()-10;
+    }
+    bool validPhone(const string& p){
+        return p.size()==10 && all_of(p.begin(),p.end(),::isdigit);
+    }
+
+    void signUp(){
+        string u; cout<<"Username: "; getline(cin,u);
+        if(u.empty()||any_of(list.begin(),list.end(),[&](auto& x){return x.user==u;})){
+            cout<<"Username already taken or empty.\n"; return;
         }
+        string p,e,t; 
+        cout<<"Password: "; getline(cin,p);
+        cout<<"Email: "; getline(cin,e);
+        if(!validEmail(e)){cout<<"Invalid email.\n";return;}
+        cout<<"Phone: "; getline(cin,t);
+        if(!validPhone(t)){cout<<"Invalid phone.\n";return;}
+        list.push_back({u,p,e,t,1,0});
+        save(); cout<<"Sign up successful!\n";
     }
 
-    /* ==== Các chức năng ==== */
-    void registerAccount() {
-        string u = safeInput("Enter username: ");
-        if (u.empty()) { cout<<"Username cannot be empty\n"; return; }
-        for (auto& acc : accounts)
-            if (acc.getUsername()==u) { cout<<"Username already exists.\n"; return; }
-        string p = safeInput("Enter password: ");
-        string e = safeInput("Enter email: ");
-        if (!isValidEmail(e)) { cout<<"Invalid email (must end with @gmail.com)\n"; return; }
-        string ph = safeInput("Enter phone: ");
-        if (!isValidPhone(ph)) { cout<<"Phone must be 10 digits.\n"; return; }
-        accounts.emplace_back(u,p,e,ph,1,0);
-        saveAccounts("account.txt");
-        cout<<"Register success!\n";
-    }
+    void signIn(){
+        string u; cout<<"Username: "; getline(cin,u);
+        auto it=find_if(list.begin(),list.end(),[&](auto& x){return x.user==u;});
+        if(it==list.end()){ cout<<"User not found.\n"; return; }
 
-    void signIn() {
-        string u = safeInput("Enter username: ");
-        for (auto& acc : accounts) {
-            if (acc.getUsername()==u) {
-                if (acc.getStatus()==0) {
-                    time_t lockedAt=getLockTime(u);
-                    time_t now=time(nullptr);
-                    if (lockedAt!=0 && difftime(now,lockedAt)>=UNLOCK_MINUTES*60) {
-                        cout<<"Auto-unlock after "<<UNLOCK_MINUTES<<" minutes.\n";
-                        acc.setStatus(1);
-                        setLockTime(u,0);
-                        saveAccounts("account.txt");
-                    } else {
-                        cout<<"Your account is blocked. Try again later.\n"; return;
-                    }
-                }
-                int tries=0; string p;
-                while (tries<3) {
-                    p = safeInput("Enter password: ");
-                    if (p==acc.getPassword()) {
-                        cout<<"Welcome "<<u<<"!\n";
-                        currentUser=&acc;
-                        logLogin(u);
-                        return;
-                    } else { cout<<"Wrong password.\n"; tries++; }
-                }
-                acc.setStatus(0);
-                setLockTime(u,time(nullptr));
-                saveAccounts("account.txt");
-                cout<<"Too many fails. Account blocked.\n";
-                return;
-            }
+        if(it->active==0){
+            long lockAt=lockTime(u), now=time(nullptr);
+            if(lockAt && now-lockAt<600){ cout<<"Account locked. Try later.\n"; return;}
+            it->active=1; setLock(u,0); save(); cout<<"Account unlocked automatically.\n";
         }
-        cout<<"Account not found.\n";
-    }
 
-    void changePassword() {
-        if (!currentUser) { cout<<"Login first.\n"; return; }
-        string oldp = safeInput("Old password: ");
-        if (oldp!=currentUser->getPassword()) { cout<<"Wrong old password.\n"; return; }
-        string newp = safeInput("New password: ");
-        currentUser->setPassword(newp);
-        saveAccounts("account.txt");
-        cout<<"Password changed.\n";
-    }
-
-    void updateAccountInfo() {
-        if (!currentUser) { cout<<"Login first.\n"; return; }
-        string ch = safeInput("1.Update email 2.Update phone: ");
-        if (ch=="1") {
-            string e = safeInput("New email: ");
-            if (!isValidEmail(e)) { cout<<"Invalid email.\n"; return; }
-            currentUser->setEmail(e);
-        } else if (ch=="2") {
-            string ph = safeInput("New phone: ");
-            if (!isValidPhone(ph)) { cout<<"Invalid phone.\n"; return; }
-            currentUser->setPhone(ph);
+        for(int i=0;i<3;i++){
+            string p; cout<<"Password: "; getline(cin,p);
+            if(p==it->pass){ cout<<"Welcome, "<<u<<"!\n"; cur=&*it; log(u); return;}
+            cout<<"Wrong password.\n";
         }
-        saveAccounts("account.txt");
-        cout<<"Info updated.\n";
+        it->active=0; setLock(u,time(nullptr)); save();
+        cout<<"Too many wrong attempts. Account locked.\n";
     }
 
-    void resetPassword() {
-        string u = safeInput("Username: ");
-        for (auto& acc:accounts) {
-            if (acc.getUsername()==u) {
-                srand(time(nullptr));
-                int code=rand()%900000+100000;
-                cout<<"[Simulated] Code sent to "<<acc.getEmail()<<": "<<code<<"\n";
-                string in = safeInput("Enter code: ");
-                if (stoi(in)!=code) { cout<<"Wrong code.\n"; return; }
-                string newp = safeInput("New password: ");
-                acc.setPassword(newp); acc.setStatus(1);
-                setLockTime(u,0);
-                saveAccounts("account.txt");
-                cout<<"Password reset success.\n"; return;
-            }
+    void changePass(){
+        if(!cur){ cout<<"Login first.\n"; return;}
+        string o; cout<<"Old password: "; getline(cin,o);
+        if(o!=cur->pass){cout<<"Incorrect.\n";return;}
+        cout<<"New password: "; getline(cin,cur->pass);
+        save(); cout<<"Password updated.\n";
+    }
+
+    void updateInfo(){
+        if(!cur){ cout<<"Login first.\n"; return;}
+        cout<<"1.Email  2.Phone: "; string c; getline(cin,c);
+        if(c=="1"){ string e; cout<<"New email: "; getline(cin,e);
+            if(validEmail(e)) cur->email=e; else {cout<<"Invalid email.\n";return;}
+        } else if(c=="2"){ string t; cout<<"New phone: "; getline(cin,t);
+            if(validPhone(t)) cur->phone=t; else {cout<<"Invalid phone.\n";return;}
         }
-        cout<<"No such account.\n";
+        save(); cout<<"Info updated.\n";
     }
 
-    void viewLoginHistory() {
-        if (!currentUser) { cout<<"Login first.\n"; return; }
-        ifstream fin("history.txt");
-        string line;
-        while (getline(fin,line)) {
-            if (line.find(currentUser->getUsername())==0) cout<<line<<"\n";
-        }
+    void resetPass(){
+        string u; cout<<"Username: "; getline(cin,u);
+        auto it=find_if(list.begin(),list.end(),[&](auto& x){return x.user==u;});
+        if(it==list.end()){cout<<"No such user.\n";return;}
+        int code=rand()%900000+100000;
+        cout<<"(Verification code sent to "<<it->email<<": "<<code<<")\n";
+        string in; cout<<"Enter code: "; getline(cin,in);
+        if(stoi(in)!=code){ cout<<"Wrong code.\n";return;}
+        cout<<"New password: "; getline(cin,it->pass);
+        it->active=1; setLock(u,0); save(); cout<<"Password reset done.\n";
     }
 
-    void signOut() {
-        if (!currentUser) { cout<<"No user logged in.\n"; return; }
-        cout<<"Goodbye "<<currentUser->getUsername()<<"!\n";
-        currentUser=nullptr;
+    void viewHistory(){
+        if(!cur){cout<<"Login first.\n";return;}
+        ifstream f("history.txt"); string line;
+        while(getline(f,line)) if(line.find(cur->user)==0) cout<<line<<"\n";
     }
 
-    /* ==== Admin functions ==== */
-    void adminMenu() {
-        if (!currentUser || currentUser->getRole()!=1) { cout<<"Not admin.\n"; return; }
-        cout<<"--- Admin Menu ---\n";
-        cout<<"1. View all accounts\n";
-        cout<<"2. Delete account\n";
-        cout<<"3. Reset password for user\n";
-        string c = safeInput("Choice: ");
-        if (c=="1") {
-            for (auto& acc:accounts)
-                cout<<acc.toString()<<"\n";
-        } else if (c=="2") {
-            string u = safeInput("Username to delete: ");
-            for (auto it=accounts.begin(); it!=accounts.end(); ++it) {
-                if (it->getUsername()==u) {
-                    accounts.erase(it);
-                    saveAccounts("account.txt");
-                    cout<<"Deleted.\n"; return;
-                }
-            }
-            cout<<"No such user.\n";
-        } else if (c=="3") {
-            string u = safeInput("Username to reset: ");
-            for (auto& acc:accounts) {
-                if (acc.getUsername()==u) {
-                    string np = safeInput("New password: ");
-                    acc.setPassword(np); acc.setStatus(1);
-                    saveAccounts("account.txt");
-                    cout<<"Password reset for "<<u<<"\n"; return;
-                }
-            }
-            cout<<"No such user.\n";
+    void signOut(){ if(cur){cout<<"Goodbye "<<cur->user<<"\n"; cur=nullptr;} }
+
+    void adminMenu(){
+        if(!cur||cur->role!=1){cout<<"Not authorized.\n";return;}
+        cout<<"1.View all  2.Delete user  3.Reset user password\nChoice: ";
+        string c; getline(cin,c);
+        if(c=="1") for(auto& x:list) cout<<x.toLine()<<"\n";
+        else if(c=="2"){ string u; cout<<"User to delete: "; getline(cin,u);
+            auto it=remove_if(list.begin(),list.end(),[&](auto& x){return x.user==u;});
+            if(it!=list.end()){ list.erase(it,list.end()); save(); cout<<"Deleted.\n"; }
+        } else if(c=="3"){ string u; cout<<"User to reset: "; getline(cin,u);
+            auto it=find_if(list.begin(),list.end(),[&](auto& x){return x.user==u;});
+            if(it!=list.end()){ cout<<"New password: "; getline(cin,it->pass); it->active=1; save(); cout<<"Reset done.\n"; }
         }
     }
 };
 
-/* =================== MAIN =================== */
-void menu(bool isAdmin) {
-    cout<<"\nUSER MANAGEMENT PROGRAM\n";
-    cout<<"1. Register\n2. Sign in\n3. Change password\n4. Update account info\n";
-    cout<<"5. Reset password\n6. View login history\n7. Sign out\n";
-    if (isAdmin) cout<<"8. Admin menu\n";
-    cout<<"Other: Quit\nChoice: ";
-}
-
-int main() {
-    AccountManager manager;
-    manager.loadAccounts("account.txt");
-    while (true) {
-        menu(true); // menu chung, Admin mới thấy mục 8
-        string ch; getline(cin,ch); ch=trim(ch);
-        if (ch=="1") manager.registerAccount();
-        else if (ch=="2") manager.signIn();
-        else if (ch=="3") manager.changePassword();
-        else if (ch=="4") manager.updateAccountInfo();
-        else if (ch=="5") manager.resetPassword();
-        else if (ch=="6") manager.viewLoginHistory();
-        else if (ch=="7") manager.signOut();
-        else if (ch=="8") manager.adminMenu();
-        else { cout<<"Exit.\n"; break; }
+int main(){
+    srand(time(nullptr));
+    AccountManager m; m.load();
+    while(true){
+        cout<<"\n--- MENU ---\n"
+              "1.Sign up\n2.Sign in\n3.Change password\n4.Update info\n"
+              "5.Forgot password\n6.View history\n7.Sign out\n8.Admin\n0.Exit\nChoice: ";
+        string c; getline(cin,c);
+        if(c=="1") m.signUp();
+        else if(c=="2") m.signIn();
+        else if(c=="3") m.changePass();
+        else if(c=="4") m.updateInfo();
+        else if(c=="5") m.resetPass();
+        else if(c=="6") m.viewHistory();
+        else if(c=="7") m.signOut();
+        else if(c=="8") m.adminMenu();
+        else if(c=="0") break;
     }
 }
